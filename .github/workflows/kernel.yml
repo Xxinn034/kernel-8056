@@ -8,11 +8,20 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout (submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 1
+      # 源码不进本仓库：GitHub 内网 clone fxsheep 上游，秒级完成，与本地慢网络无关
+      - name: Clone kyletd upstream (GitHub 内网)
+        run: |
+          set -e
+          git clone --depth=1 -b sprdlinux3.0-kyletd \
+            https://github.com/fxsheep/sprd-kernel-kyletd.git kernel
+          # 本仓库的补丁若有 patches/*.patch 则依序应用
+          if [ -d patches ]; then
+            for p in patches/*.patch; do
+              [ -e "$p" ] || continue
+              echo "应用补丁: $p"
+              git -C kernel apply --whitespace=nowarn "$p"
+            done
+          fi
 
       - name: Cache toolchain + ccache
         uses: actions/cache@v4
@@ -20,9 +29,9 @@ jobs:
           path: |
             toolchain
             /home/runner/.ccache
-          key: arm-eabi-4.4.3-tc-v1-ccache-v1
+          key: arm-eabi-4.4.3-tc-v2-ccache-v1
           restore-keys: |
-            arm-eabi-4.4.3-tc-v1-
+            arm-eabi-4.4.3-tc-v2-
 
       - name: Fetch toolchain (AOKP prebuilt arm-eabi-4.4.3)
         run: |
@@ -33,37 +42,34 @@ jobs:
           toolchain/bin/arm-eabi-gcc --version | head -1
 
       - name: Install ccache
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache u-boot-tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
 
       - name: Configure kernel
         run: |
           set -e
           export PATH="$PWD/toolchain/bin:/usr/lib/ccache:$PATH"
-          export ARCH=arm CROSS_COMPILE="ccache arm-eabi-"
-          make O=build kyletd-vlx_defconfig
+          make -C kernel O=build ARCH=arm CROSS_COMPILE="ccache arm-eabi-" kyletd-vlx_defconfig
 
       - name: Build kernel
         run: |
           set -e
           export PATH="$PWD/toolchain/bin:/usr/lib/ccache:$PATH"
-          export ARCH=arm CROSS_COMPILE="ccache arm-eabi-"
-          make O=build -j$(nproc) zImage
-          make O=build -j$(nproc) modules || true
+          make -C kernel O=build -j$(nproc) zImage
+          make -C kernel O=build -j$(nproc) modules || true
 
       - name: Verify artifacts
         run: |
           set -e
-          ls -l build/arch/arm/boot/zImage
-          file build/arch/arm/boot/zImage
-          gzip -t < build/arch/arm/boot/zImage > /dev/null 2>&1 || echo "zImage 非纯 gzip（正常，zImage 自解压头）"
-          strings build/arch/arm/boot/zImage | grep -m1 'Linux version' || true
+          ls -l kernel/build/arch/arm/boot/zImage
+          file kernel/build/arch/arm/boot/zImage
+          strings kernel/build/arch/arm/boot/zImage | grep -m1 'Linux version' || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: zImage-${{ github.sha }}
           path: |
-            build/arch/arm/boot/zImage
-            build/System.map
-            build/.config
+            kernel/build/arch/arm/boot/zImage
+            kernel/build/System.map
+            kernel/build/.config
           if-no-files-found: error
           retention-days: 30
