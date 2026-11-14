@@ -48,6 +48,7 @@ jobs:
         run: |
           set -e
           export PATH="$PWD/toolchain/bin:/usr/lib/ccache:$PATH"
+          mkdir -p kernel/build
           make -C kernel O=build ARCH=arm CROSS_COMPILE="ccache arm-eabi-" kyletd-vlx_defconfig
 
       - name: Build kernel
